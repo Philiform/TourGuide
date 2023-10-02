@@ -1,13 +1,8 @@
 package com.openclassrooms.tourguide.service;
 
-import com.openclassrooms.tourguide.helper.InternalTestHelper;
-import com.openclassrooms.tourguide.tracker.Tracker;
-import com.openclassrooms.tourguide.user.User;
-import com.openclassrooms.tourguide.user.UserReward;
-
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -22,11 +17,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.openclassrooms.tourguide.helper.InternalTestHelper;
+import com.openclassrooms.tourguide.service.dto.AttractionDistanceDTO;
+import com.openclassrooms.tourguide.service.dto.AttractionNearDTO;
+import com.openclassrooms.tourguide.tracker.Tracker;
+import com.openclassrooms.tourguide.user.User;
+import com.openclassrooms.tourguide.user.UserReward;
+
 import gpsUtil.GpsUtil;
-import gpsUtil.location.Attraction;
 import gpsUtil.location.Location;
 import gpsUtil.location.VisitedLocation;
-
 import tripPricer.Provider;
 import tripPricer.TripPricer;
 
@@ -105,16 +105,35 @@ public class TourGuideService {
 		return visitedLocation;
 	}
 
-	public List<Attraction> getNearByAttractions(VisitedLocation visitedLocation) {
-		List<Attraction> nearbyAttractions = new ArrayList<>();
+	public List<AttractionNearDTO> getNearByAttractions(final String userName) {
+		User user = getUser(userName);
 
-		for (Attraction attraction : gpsUtil.getAttractions()) {
-			if (rewardsService.isWithinAttractionProximity(attraction, visitedLocation.location)) {
-				nearbyAttractions.add(attraction);
-			}
-		}
+		getUserLocation(user);
 
-		return nearbyAttractions;
+		Location locationUser = user.getLastVisitedLocation().location;
+
+		return gpsUtil.getAttractions().parallelStream()
+			.map(a -> {
+				Location l = new Location(a.latitude, a.longitude);
+				AttractionDistanceDTO adDTO = new AttractionDistanceDTO(
+						a,
+						l,
+						rewardsService.getDistance(l, locationUser));
+				return adDTO;
+			})
+			.sorted(Comparator.comparingDouble(AttractionDistanceDTO::getDistance))
+			.limit(5)
+			.map(dto -> {
+				AttractionNearDTO obj = new AttractionNearDTO(
+					dto.getAttraction().attractionName,
+					dto.getLocation(),
+					locationUser,
+					dto.getDistance(),
+					rewardsService.getRewardPoints(dto.getAttraction(), user));
+
+				return obj;
+			}).collect(Collectors.toList());
+
 	}
 
 	private void addShutDownHook() {
