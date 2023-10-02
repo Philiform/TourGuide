@@ -5,10 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.openclassrooms.tourguide.concurrent.ExecutorServices;
 import com.openclassrooms.tourguide.helper.InternalTestHelper;
 import com.openclassrooms.tourguide.service.dto.AttractionNearDTO;
 import com.openclassrooms.tourguide.user.User;
@@ -26,20 +30,30 @@ public class TestTourGuideService {
 
 	@BeforeEach
 	public void initEach(){
+		ExecutorServices.setEsRewardsService(Executors.newCachedThreadPool());
+		ExecutorServices.setEsTourGuideService(Executors.newCachedThreadPool());
+		ExecutorServices.setEsTracker(Executors.newScheduledThreadPool(1));
+
 		gpsUtil = new GpsUtil();
 		rewardsService = new RewardsService(gpsUtil, new RewardCentral());
 
 		InternalTestHelper.setInternalUserNumber(0);
 
 		tourGuideService = new TourGuideService(gpsUtil, rewardsService);
-		tourGuideService.tracker.stopTracking();
+		ExecutorServices.shutdownNowEsTracker();
+	}
+
+	@AfterEach
+	public void cleanUpEach(){
+		ExecutorServices.shutdownNowEsRewardsService();;
+		ExecutorServices.shutdownNowEsTourGuideService();;
 	}
 
 	@Test
-	public void getUserLocation() {
+	public void getUserLocation() throws InterruptedException, ExecutionException {
 		User user = new User(UUID.randomUUID(), "jon", "000", "jon@tourGuide.com");
 
-		VisitedLocation visitedLocation = tourGuideService.trackUserLocation(user);
+		VisitedLocation visitedLocation = tourGuideService.trackUserLocation(user).get();
 
 		assertTrue(visitedLocation.userId.equals(user.getUserId()));
 	}
@@ -74,9 +88,9 @@ public class TestTourGuideService {
 	}
 
 	@Test
-	public void trackUser() {
+	public void trackUser() throws InterruptedException, ExecutionException {
 		User user = new User(UUID.randomUUID(), "jon", "000", "jon@tourGuide.com");
-		VisitedLocation visitedLocation = tourGuideService.trackUserLocation(user);
+		VisitedLocation visitedLocation = tourGuideService.trackUserLocation(user).get();
 
 		assertEquals(user.getUserId(), visitedLocation.userId);
 	}

@@ -6,10 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Executors;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import com.openclassrooms.tourguide.concurrent.ExecutorServices;
 import com.openclassrooms.tourguide.helper.InternalTestHelper;
 import com.openclassrooms.tourguide.user.User;
 import com.openclassrooms.tourguide.user.UserReward;
@@ -26,8 +29,15 @@ public class TestRewardsService {
 
 	@BeforeEach
 	public void initEach(){
+		ExecutorServices.setEsRewardsService(Executors.newCachedThreadPool());
+
 		gpsUtil = new GpsUtil();
 		rewardsService = new RewardsService(gpsUtil, new RewardCentral());
+	}
+
+	@AfterEach
+	public void cleanUpEach(){
+		ExecutorServices.shutdownNowEsRewardsService();;
 	}
 
 	@Test
@@ -52,6 +62,9 @@ public class TestRewardsService {
 
 	@Test
 	public void nearAllAttractions() {
+		ExecutorServices.setEsTourGuideService(Executors.newCachedThreadPool());
+		ExecutorServices.setEsTracker(Executors.newScheduledThreadPool(1));
+
 		rewardsService.setProximityBuffer(Integer.MAX_VALUE);
 
 		InternalTestHelper.setInternalUserNumber(1);
@@ -62,7 +75,8 @@ public class TestRewardsService {
 
 		List<UserReward> userRewards = tourGuideService.getUserRewards(user);
 
-		tourGuideService.tracker.stopTracking();
+		ExecutorServices.shutdownNowEsTourGuideService();;
+		ExecutorServices.shutdownNowEsTracker();
 
 		assertEquals(gpsUtil.getAttractions().size(), userRewards.size());
 	}

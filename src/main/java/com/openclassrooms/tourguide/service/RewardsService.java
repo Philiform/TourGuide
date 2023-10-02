@@ -1,11 +1,19 @@
 package com.openclassrooms.tourguide.service;
 
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.openclassrooms.tourguide.concurrent.ExecutorServices;
+import com.openclassrooms.tourguide.concurrent.RunnableReward;
+import com.openclassrooms.tourguide.concurrent.RunnableUser;
 import com.openclassrooms.tourguide.user.User;
-import com.openclassrooms.tourguide.user.UserReward;
 
 import gpsUtil.GpsUtil;
 import gpsUtil.location.Attraction;
@@ -16,6 +24,8 @@ import rewardCentral.RewardCentral;
 @Service
 public class RewardsService {
 
+	private Logger logger = LoggerFactory.getLogger(RewardsService.class);
+
 	private static final double STATUTE_MILES_PER_NAUTICAL_MILE = 1.15077945;
 
 	// proximity in miles
@@ -25,9 +35,20 @@ public class RewardsService {
 	private final GpsUtil gpsUtil;
 	private final RewardCentral rewardsCentral;
 
+	private final ExecutorService executor;
+	private List<CompletableFuture<Void>> listCompletableFuture = new ArrayList<>();
+	private List<Attraction> listAttractions = new ArrayList<>();
+
 	public RewardsService(GpsUtil gpsUtil, RewardCentral rewardCentral) {
 		this.gpsUtil = gpsUtil;
 		this.rewardsCentral = rewardCentral;
+		executor = ExecutorServices.getEsRewardsService();
+
+		init();
+	}
+
+	private void init() {
+		listAttractions.addAll(gpsUtil.getAttractions());
 	}
 
 	public void setProximityBuffer(int proximityBuffer) {
@@ -38,29 +59,41 @@ public class RewardsService {
 		proximityBuffer = defaultProximityBuffer;
 	}
 
+	public void calculateRewardsForAllUsers(List<User> allUsers) {
+		logger.info("calculateRewardsForAllUsers");
+
+		listCompletableFuture.clear();
+
+		allUsers.stream().map(u -> {
+			RunnableUser runnableUser = new RunnableUser(u, this);
+			CompletableFuture<Void> cpf = CompletableFuture.runAsync(runnableUser, executor);
+			listCompletableFuture.add(cpf);
+
+			return u;
+		}).collect(Collectors.toList());
+
+		CompletableFuture.allOf(listCompletableFuture.toArray(new CompletableFuture[listCompletableFuture.size()])).join();
+	}
+
 	public void calculateRewards(User user) {
-		CopyOnWriteArrayList<VisitedLocation> userLocationsCopy = new CopyOnWriteArrayList<>();
-		CopyOnWriteArrayList<Attraction> attractionsCopy = new CopyOnWriteArrayList<>();
+		List<CompletableFuture<Void>> listCompletableFuture2 = new ArrayList<>();
 
-		userLocationsCopy.addAll(user.getVisitedLocations());
-		attractionsCopy.addAll(gpsUtil.getAttractions());
+		listAttractions.stream().map(a -> {
+			RunnableReward runnableReward = new RunnableReward(user, a, this);
+			CompletableFuture<Void> cpf = CompletableFuture.runAsync(runnableReward, executor);
+			listCompletableFuture2.add(cpf);
 
-		userLocationsCopy.stream().forEach(visitedLocation -> {
-			attractionsCopy.stream().forEach(attraction -> {
-				if(user.getUserRewards().stream().filter(r -> r.getAttraction().attractionName.equals(attraction.attractionName)).count() == 0) {
-					if(nearAttraction(visitedLocation, attraction)) {
-						user.addUserReward(new UserReward(visitedLocation, attraction, getRewardPoints(attraction, user)));
-					}
-				}
-			});
-		});
+			return a;
+		}).collect(Collectors.toList());
+
+		CompletableFuture.allOf(listCompletableFuture2.toArray(new CompletableFuture[listCompletableFuture2.size()])).join();
 	}
 
 	public boolean isWithinAttractionProximity(Attraction attraction, Location location) {
 		return getDistance(attraction, location) > attractionProximityRange ? false : true;
 	}
 
-	private boolean nearAttraction(VisitedLocation visitedLocation, Attraction attraction) {
+	public boolean nearAttraction(VisitedLocation visitedLocation, Attraction attraction) {
 		return getDistance(attraction, visitedLocation.location) > proximityBuffer ? false : true;
 	}
 

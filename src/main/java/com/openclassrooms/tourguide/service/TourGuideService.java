@@ -2,6 +2,7 @@ package com.openclassrooms.tourguide.service;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -10,6 +11,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -17,6 +21,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.openclassrooms.tourguide.concurrent.ExecutorServices;
+import com.openclassrooms.tourguide.concurrent.SupplierUserLocation;
 import com.openclassrooms.tourguide.helper.InternalTestHelper;
 import com.openclassrooms.tourguide.service.dto.AttractionDistanceDTO;
 import com.openclassrooms.tourguide.service.dto.AttractionNearDTO;
@@ -41,11 +47,15 @@ public class TourGuideService {
 	public final Tracker tracker;
 	boolean testMode = true;
 
+	private final ExecutorService executor;
+
 	public TourGuideService(GpsUtil gpsUtil, RewardsService rewardsService) {
 		this.gpsUtil = gpsUtil;
 		this.rewardsService = rewardsService;
 
 		Locale.setDefault(Locale.US);
+
+		executor = ExecutorServices.getEsTourGuideService();
 
 		if (testMode) {
 			logger.info("TestMode enabled");
@@ -53,8 +63,9 @@ public class TourGuideService {
 			initializeInternalUsers();
 			logger.debug("Finished initializing users");
 		}
+
 		tracker = new Tracker(this);
-		addShutDownHook();
+		tracker.startTracking();
 	}
 
 	public List<UserReward> getUserRewards(User user) {
@@ -62,8 +73,15 @@ public class TourGuideService {
 	}
 
 	public VisitedLocation getUserLocation(User user) {
-		VisitedLocation visitedLocation = (user.getVisitedLocations().size() > 0) ? user.getLastVisitedLocation()
-				: trackUserLocation(user);
+		VisitedLocation visitedLocation = null;
+		try {
+			visitedLocation = (user.getVisitedLocations().size() > 0) ? user.getLastVisitedLocation()
+					: trackUserLocation(user).get();
+		} catch (InterruptedException e) {
+			logger.error(e.getMessage());
+		} catch (ExecutionException e) {
+			logger.error(e.getMessage());
+		}
 		return visitedLocation;
 	}
 
@@ -96,13 +114,32 @@ public class TourGuideService {
 		return providers;
 	}
 
-	public VisitedLocation trackUserLocation(User user) {
-		VisitedLocation visitedLocation = gpsUtil.getUserLocation(user.getUserId());
+	public CompletableFuture<VisitedLocation> trackUserLocation(User user) {
+		try {
+			SupplierUserLocation supplierUserLocation = new SupplierUserLocation(user, gpsUtil, rewardsService);
 
-		user.addToVisitedLocations(visitedLocation);
-		rewardsService.calculateRewards(user);
+			return CompletableFuture.supplyAsync(supplierUserLocation, executor);
+		} catch (Throwable e) {
+			// TODO: handle exception
+		}
+		return null;
+	}
 
-		return visitedLocation;
+	public void trackLocationForAllUsers(List<User> allUsers) {
+		try {
+			List<CompletableFuture<VisitedLocation>> listCompletableFuture = new ArrayList<>();
+
+			allUsers.stream().map(u -> {
+				CompletableFuture<VisitedLocation> cpf = trackUserLocation(u);
+				listCompletableFuture.add(cpf);
+
+				return u;
+			}).collect(Collectors.toList());
+
+			CompletableFuture.allOf(listCompletableFuture.toArray(new CompletableFuture[listCompletableFuture.size()])).join();
+		} catch (Exception e) {
+			logger.error(e.getMessage());
+		}
 	}
 
 	public List<AttractionNearDTO> getNearByAttractions(final String userName) {
@@ -134,15 +171,6 @@ public class TourGuideService {
 				return obj;
 			}).collect(Collectors.toList());
 
-	}
-
-	private void addShutDownHook() {
-		Runtime.getRuntime().addShutdownHook(new Thread() {
-			@Override
-			public void run() {
-				tracker.stopTracking();
-			}
-		});
 	}
 
 	/**********************************************************************************
