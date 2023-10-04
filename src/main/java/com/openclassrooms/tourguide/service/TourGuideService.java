@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -85,8 +86,8 @@ public class TourGuideService {
 		return visitedLocation;
 	}
 
-	public User getUser(String userName) {
-		return internalUserMap.get(userName);
+	public Optional<User> getUser(String userName) {
+		return Optional.of(internalUserMap.get(userName));
 	}
 
 	public List<User> getAllUsers() {
@@ -120,7 +121,7 @@ public class TourGuideService {
 
 			return CompletableFuture.supplyAsync(supplierUserLocation, executor);
 		} catch (Throwable e) {
-			// TODO: handle exception
+			logger.error(e.getMessage());
 		}
 		return null;
 	}
@@ -143,7 +144,7 @@ public class TourGuideService {
 	}
 
 	public List<AttractionNearDTO> getNearByAttractions(final String userName) {
-		User user = getUser(userName);
+		User user = getUser(userName).get();
 
 		getUserLocation(user);
 

@@ -66,8 +66,8 @@ public class TestTourGuideService {
 		tourGuideService.addUser(user);
 		tourGuideService.addUser(user2);
 
-		User retrivedUser = tourGuideService.getUser(user.getUserName());
-		User retrivedUser2 = tourGuideService.getUser(user2.getUserName());
+		User retrivedUser = tourGuideService.getUser(user.getUserName()).get();
+		User retrivedUser2 = tourGuideService.getUser(user2.getUserName()).get();
 
 		assertEquals(user, retrivedUser);
 		assertEquals(user2, retrivedUser2);
